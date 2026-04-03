@@ -1,15 +1,11 @@
 import express from 'express';
 import cors from 'cors';
-import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { PrismaClient } from '@prisma/client';
 
 const app = express();
 const prisma = new PrismaClient();
 const PORT = process.env.PORT || 3001;
-
-// Sicherheits-Header
-app.use(helmet());
 
 // CORS nur für erlaubte Domains
 const allowedOrigins = [
