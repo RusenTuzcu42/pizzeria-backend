@@ -14,6 +14,8 @@ model Product {
   category    String
   ingredients String[]
   sortOrder   Int      @default(0)
+
+  @@map("Product")
 }
 
 model Order {
