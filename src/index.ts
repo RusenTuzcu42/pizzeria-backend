@@ -1,105 +1,56 @@
 import express from 'express';
 import cors from 'cors';
-import rateLimit from 'express-rate-limit';
-import { PrismaClient } from '@prisma/client';
+import { Pool } from 'pg';
 
 const app = express();
-const prisma = new PrismaClient();
 const PORT = process.env.PORT || 3001;
 
-// CORS nur für erlaubte Domains
-const allowedOrigins = [
-  'http://localhost:3000',
-  'http://localhost:3001',
-  'https://pizzeria-frontend.vercel.app'
-];
-
-app.use(cors({
-  origin: allowedOrigins,
-  credentials: true
-}));
-
-app.use(express.json());
-
-// Rate Limiting für Bestellungen
-const orderLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000,
-  max: 10,
-  message: { error: 'Zu viele Bestellungen. Bitte warte eine Stunde.' }
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false }
 });
 
-// Gesundheitscheck
+app.use(cors());
+app.use(express.json());
+
 app.get('/api/health', (req, res) => {
   res.json({ status: 'OK', timestamp: new Date().toISOString() });
 });
 
-// Alle Produkte
 app.get('/api/products', async (req, res) => {
   try {
-    const products = await prisma.product.findMany({
-      orderBy: [{ category: 'asc' }, { sortOrder: 'asc' }, { name: 'asc' }]
-    });
-    res.json(products);
+    const result = await pool.query('SELECT * FROM "Product" ORDER BY category ASC, "sortOrder" ASC, name ASC');
+    res.json(result.rows);
   } catch (error) {
+    console.error(error);
     res.status(500).json({ error: 'Fehler beim Laden der Produkte' });
   }
 });
 
-// Bestellung aufgeben
-app.post('/api/orders', orderLimiter, async (req, res) => {
+app.post('/api/orders', async (req, res) => {
   try {
     const { customerName, customerPhone, customerAddress, deliveryMethod, paymentMethod, items, total, notes } = req.body;
+    const orderNumber = Math.floor(Math.random() * 1000000);
     
-    // Validierung
-    if (!customerName || customerName.length < 2 || customerName.length > 50) {
-      return res.status(400).json({ error: 'Bitte geben Sie einen gültigen Namen ein (2-50 Zeichen).' });
-    }
+    const result = await pool.query(
+      'INSERT INTO "Order" ("orderNumber", "customerName", "customerPhone", "customerAddress", "deliveryMethod", "paymentMethod", total, notes, items, "createdAt") VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW()) RETURNING "orderNumber"',
+      [orderNumber, customerName, customerPhone, customerAddress, deliveryMethod, paymentMethod, total, notes, JSON.stringify(items)]
+    );
     
-    if (!customerPhone || !/^[0-9+\-\s\/]{5,20}$/.test(customerPhone)) {
-      return res.status(400).json({ error: 'Bitte geben Sie eine gültige Telefonnummer ein.' });
-    }
-    
-    if (!items || !Array.isArray(items) || items.length === 0) {
-      return res.status(400).json({ error: 'Ihr Warenkorb ist leer.' });
-    }
-    
-    if (!total || total <= 0) {
-      return res.status(400).json({ error: 'Ungültiger Gesamtbetrag.' });
-    }
-    
-    const lastOrder = await prisma.order.findFirst({
-      orderBy: { orderNumber: 'desc' }
-    });
-    const orderNumber = (lastOrder?.orderNumber || 0) + 1;
-    
-    const order = await prisma.order.create({
-      data: {
-        orderNumber,
-        customerName,
-        customerPhone,
-        customerAddress: customerAddress || '',
-        deliveryMethod: deliveryMethod || 'delivery',
-        paymentMethod: paymentMethod || 'cash',
-        total,
-        notes: notes || '',
-        items: JSON.stringify(items)
-      }
-    });
-    
-    res.json({ success: true, orderNumber: order.orderNumber });
+    res.json({ success: true, orderNumber: result.rows[0].orderNumber });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ error: 'Fehler bei der Bestellung. Bitte versuchen Sie es später erneut.' });
+    res.status(500).json({ error: 'Fehler bei der Bestellung' });
   }
 });
 
-// Bestellstatus
 app.get('/api/orders/:orderNumber', async (req, res) => {
   try {
-    const order = await prisma.order.findUnique({
-      where: { orderNumber: parseInt(req.params.orderNumber) }
-    });
-    res.json(order);
+    const result = await pool.query('SELECT * FROM "Order" WHERE "orderNumber" = $1', [parseInt(req.params.orderNumber)]);
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Bestellung nicht gefunden' });
+    }
+    res.json(result.rows[0]);
   } catch (error) {
     res.status(500).json({ error: 'Fehler beim Abrufen der Bestellung' });
   }
