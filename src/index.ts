@@ -19,6 +19,7 @@ app.get('/api/health', (req, res) => {
 
 app.get('/api/products', async (req, res) => {
   try {
+    // Wichtig: Der Tabellenname "Product" muss in Anführungszeichen stehen!
     const result = await pool.query('SELECT * FROM "Product" ORDER BY category ASC, "sortOrder" ASC, name ASC');
     res.json(result.rows);
   } catch (error) {
